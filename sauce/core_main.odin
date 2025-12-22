@@ -7,18 +7,18 @@ Main entrypoint & structure of the frame / update loop.
 */
 
 import "utils"
-import "utils/shape"
 import "utils/logger"
+import "utils/shape"
 
-import "core:sync"
-import "core:strings"
-import "core:math"
-import "core:math/linalg"
+import "base:builtin"
+import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:math"
+import "core:math/linalg"
+import "core:strings"
+import "core:sync"
 import "core:time"
-import "base:runtime"
-import "base:builtin"
 
 import sapp "sokol/app"
 import sg "sokol/gfx"
@@ -28,7 +28,7 @@ import slog "sokol/log"
 import win32 "core:sys/windows" // wait, how is this building on mac?
 
 Core_Context :: struct {
-	gs: ^Game_State,
+	gs:      ^Game_State,
 	delta_t: f32,
 
 	// #todo, put input in here and make helpers that wrap over
@@ -38,7 +38,7 @@ ctx: Core_Context
 set_ctx :: proc(_ctx: Core_Context) {
 	ctx = _ctx
 }
-@(deferred_out=set_ctx)
+@(deferred_out = set_ctx)
 push_ctx :: proc() -> Core_Context {
 	return ctx
 }
@@ -51,24 +51,26 @@ main :: proc() {
 	our_context = logger.get_context_for_logging()
 	context = our_context
 
-	sapp.run({
-		init_cb = core_app_init,
-		frame_cb = core_app_frame,
-		cleanup_cb = core_app_shutdown,
-		event_cb = event_callback,
-		width = i32(window_w),
-		height = i32(window_h),
-		window_title = WINDOW_TITLE,
-		icon = { sokol_default = true },
-		logger = { func = slog.func },
-	})
+	sapp.run(
+		{
+			init_cb = core_app_init,
+			frame_cb = core_app_frame,
+			cleanup_cb = core_app_shutdown,
+			event_cb = event_callback,
+			width = i32(window_w),
+			height = i32(window_h),
+			window_title = WINDOW_TITLE,
+			icon = {sokol_default = true},
+			logger = {func = slog.func},
+		},
+	)
 }
 
 // don't directly access this global, use the ctx.gs instead.
 // (getting used to this will help later when you upgrade to a fixed timestep, don't worry about it now tho)
 _actual_game_state: ^Game_State
 
-core_app_init :: proc "c" () { // these sokol callbacks are c procs
+core_app_init :: proc "c" () { 	// these sokol callbacks are c procs
 	context = our_context // so we need to add the odin context in
 
 	// we call the utility here so it can mark the start time of the program
@@ -82,7 +84,7 @@ core_app_init :: proc "c" () { // these sokol callbacks are c procs
 		win32.FreeConsole()
 	}
 
-  // One day fmod, one day
+	// One day fmod, one day
 	// sound_init()
 
 	entity_init_core()
@@ -119,8 +121,8 @@ core_app_frame :: proc "c" () {
 	// calculate time since last frame
 	{
 		current_time := utils.seconds_since_init()
-		frame_time = current_time-last_frame_time
-		last_frame_time = current_time 
+		frame_time = current_time - last_frame_time
+		last_frame_time = current_time
 
 		// clamp frame time so it doesn't go to an insane number
 		MIN_FRAME_TIME :: 1.0 / 20.0
