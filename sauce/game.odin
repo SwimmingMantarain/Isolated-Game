@@ -232,13 +232,13 @@ app_frame :: proc() {
 		draw_text({x, y}, "hello world.", z_layer=.ui, pivot=utils.Pivot.top_left)
 	}
 
-	sound_play_continuously("event:/ambiance", "")
+	//sound_play_continuously("event:/ambiance", "")
 
 	game_update()
 	game_draw()
 
 	volume :f32= 0.75
-	sound_update(get_player().pos, volume)
+	//sound_update(get_player().pos, volume)
 }
 
 app_shutdown :: proc() {
@@ -280,7 +280,7 @@ game_update :: proc() {
 
 		pos := mouse_pos_in_current_space()
 		log.info("schloop at", pos)
-		sound_play("event:/schloop", pos=pos)
+		//sound_play("event:/schloop", pos=pos)
 	}
 
 	utils.animate_to_target_v2(&ctx.gs.cam_pos, get_player().pos, ctx.delta_t, rate=10)

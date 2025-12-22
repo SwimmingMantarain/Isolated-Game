@@ -82,7 +82,8 @@ core_app_init :: proc "c" () { // these sokol callbacks are c procs
 		win32.FreeConsole()
 	}
 
-	sound_init()
+  // One day fmod, one day
+	// sound_init()
 
 	entity_init_core()
 

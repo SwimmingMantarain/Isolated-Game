@@ -8,5 +8,6 @@ package main
 Platform :: enum {
 	windows,
 	mac,
+	linux,
 }
-PLATFORM :: Platform.windows
+PLATFORM :: Platform.linux
