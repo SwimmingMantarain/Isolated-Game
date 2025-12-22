@@ -60,7 +60,9 @@ render_init :: proc() {
 	load_font()
 
 	// make the vertex buffer
-	render_state.bind.vertex_buffers[0] = sg.make_buffer({size = size_of(actual_quad_data)})
+	render_state.bind.vertex_buffers[0] = sg.make_buffer(
+		{size = size_of(actual_quad_data), usage = {stream_update = true, vertex_buffer = true}},
+	)
 
 	// make & fill the index buffer
 	index_buffer_count :: MAX_QUADS * 6
@@ -78,7 +80,10 @@ render_init :: proc() {
 		i += 6
 	}
 	render_state.bind.index_buffer = sg.make_buffer(
-		{data = {ptr = raw_data(indices), size = size_of(u16) * index_buffer_count}},
+		{
+			data = {ptr = raw_data(indices), size = size_of(u16) * index_buffer_count},
+			usage = {index_buffer = true},
+		},
 	)
 
 	// image stuff
