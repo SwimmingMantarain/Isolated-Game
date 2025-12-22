@@ -1,3 +1,4 @@
+#+feature dynamic-literals
 /*
 
 Build script.
@@ -7,20 +8,20 @@ There's too many project-specific settings here, so it's not worth the effort.
 
 */
 
-#+feature dynamic-literals
+
 package build
 
-import path "core:path/filepath"
 import "core:fmt"
-import "core:os/os2"
-import "core:os"
-import "core:strings"
 import "core:log"
+import "core:os"
+import "core:os/os2"
+import path "core:path/filepath"
 import "core:reflect"
+import "core:strings"
 import "core:time"
 
-import logger "../utils/logger"
 import utils "../utils"
+import logger "../utils/logger"
 
 EXE_NAME :: "game"
 
@@ -113,8 +114,6 @@ main :: proc() {
 	)
 
 	wd := os.get_current_directory()
-
-	//utils.make_directory_if_not_exist("build")
 
 	out_dir: string
 	switch target {
