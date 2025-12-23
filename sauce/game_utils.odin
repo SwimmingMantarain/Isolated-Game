@@ -12,11 +12,11 @@ import "utils"
 import "utils/color"
 import "utils/shape"
 
-import "core:log"
 import "core:fmt"
-import "core:mem"
+import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
 
 //
 // shorthand namespace helpers
@@ -24,7 +24,7 @@ import "core:math/linalg"
 Vec2 :: [2]f32
 Vec3 :: [3]f32
 Vec4 :: [4]f32
-Matrix4 :: linalg.Matrix4f32;
+Matrix4 :: linalg.Matrix4f32
 Vec2i :: [2]int
 
 //
@@ -43,14 +43,21 @@ DEV :: #config(DEV, NOT_RELEASE)
 // game spaces
 
 get_world_space :: proc() -> Coord_Space {
-	return {proj=get_world_space_proj(), camera=get_world_space_camera()}
+	return {proj = get_world_space_proj(), camera = get_world_space_camera()}
 }
 get_screen_space :: proc() -> Coord_Space {
-	return {proj=get_screen_space_proj(), camera=Matrix4(1)}
+	return {proj = get_screen_space_proj(), camera = Matrix4(1)}
 }
 
 get_world_space_proj :: proc() -> Matrix4 {
-	return linalg.matrix_ortho3d_f32(f32(window_w) * -0.5, f32(window_w) * 0.5, f32(window_h) * -0.5, f32(window_h) * 0.5, -1, 1)
+	return linalg.matrix_ortho3d_f32(
+		f32(window_w) * -0.5,
+		f32(window_w) * 0.5,
+		f32(window_h) * -0.5,
+		f32(window_h) * 0.5,
+		-1,
+		1,
+	)
 }
 get_world_space_camera :: proc() -> Matrix4 {
 	cam := Matrix4(1)
@@ -64,14 +71,14 @@ get_camera_zoom :: proc() -> f32 {
 
 get_screen_space_proj :: proc() -> Matrix4 {
 	scale := f32(GAME_RES_HEIGHT) / f32(window_h) // same res as standard world zoom
-	
+
 	w := f32(window_w) * scale
 	h := f32(window_h) * scale
-	
-	// this centers things
-	offset := GAME_RES_WIDTH*0.5 - w*0.5
 
-	return linalg.matrix_ortho3d_f32(0+offset, w+offset, 0, h, -1, 1)
+	// this centers things
+	offset := GAME_RES_WIDTH * 0.5 - w * 0.5
+
+	return linalg.matrix_ortho3d_f32(0 + offset, w + offset, 0, h, -1, 1)
 }
 
 //
@@ -129,64 +136,64 @@ now :: proc() -> f64 {
 	return ctx.gs.game_time_elapsed
 }
 end_time_up :: proc(end_time: f64) -> bool {
-	return end_time == -1 ? false : now() >= end_time 
+	return end_time == -1 ? false : now() >= end_time
 }
 time_since :: proc(time: f64) -> f32 {
 	if time == 0 {
 		return 99999999.0
 	}
-	return f32(now()-time)
+	return f32(now() - time)
 }
 
 //
 // UI
 
 screen_pivot_v2 :: proc(pivot: utils.Pivot) -> Vec2 {
-	x,y := screen_pivot(pivot)
-	return Vec2{x,y}
+	x, y := screen_pivot(pivot)
+	return Vec2{x, y}
 }
 
 screen_pivot :: proc(pivot: utils.Pivot) -> (x, y: f32) {
-	#partial switch(pivot) {
-		case .top_left:
+	#partial switch (pivot) {
+	case .top_left:
 		x = 0
 		y = f32(window_h)
-		
-		case .top_center:
+
+	case .top_center:
 		x = f32(window_w) / 2
 		y = f32(window_h)
-		
-		case .bottom_left:
+
+	case .bottom_left:
 		x = 0
 		y = 0
-		
-		case .center_center:
+
+	case .center_center:
 		x = f32(window_w) / 2
 		y = f32(window_h) / 2
-		
-		case .top_right:
+
+	case .top_right:
 		x = f32(window_w)
 		y = f32(window_h)
-		
-		case .bottom_center:
+
+	case .bottom_center:
 		x = f32(window_w) / 2
 		y = 0
-		
-		case:
+
+	case:
 		utils.crash_when_debug(pivot, "TODO")
 	}
-	
-	ndc_x := (x / (f32(window_w) * 0.5)) - 1.0;
-	ndc_y := (y / (f32(window_h) * 0.5)) - 1.0;
-	
+
+	ndc_x := (x / (f32(window_w) * 0.5)) - 1.0
+	ndc_y := (y / (f32(window_h) * 0.5)) - 1.0
+
 	mouse_ndc := Vec2{ndc_x, ndc_y}
-	
+
 	mouse_world := Vec4{mouse_ndc.x, mouse_ndc.y, 0, 1}
-	
+
 	mouse_world = linalg.inverse(get_screen_space_proj()) * mouse_world
 	x = mouse_world.x
 	y = mouse_world.y
-	
+
 	return
 }
 
@@ -206,19 +213,19 @@ mouse_pos_in_current_space :: proc() -> Vec2 {
 	if proj == {} || cam == {} {
 		log.error("not in a space, need to push_coord_space first")
 	}
-	
+
 	mouse := Vec2{state.mouse_x, state.mouse_y}
 
-	ndc_x := (mouse.x / (f32(window_w) * 0.5)) - 1.0;
-	ndc_y := (mouse.y / (f32(window_h) * 0.5)) - 1.0;
+	ndc_x := (mouse.x / (f32(window_w) * 0.5)) - 1.0
+	ndc_y := (mouse.y / (f32(window_h) * 0.5)) - 1.0
 	ndc_y *= -1
-	
+
 	mouse_ndc := Vec2{ndc_x, ndc_y}
-	
-	mouse_world :Vec4= Vec4{mouse_ndc.x, mouse_ndc.y, 0, 1}
+
+	mouse_world: Vec4 = Vec4{mouse_ndc.x, mouse_ndc.y, 0, 1}
 
 	mouse_world = linalg.inverse(proj) * mouse_world
 	mouse_world = cam * mouse_world
-	
+
 	return mouse_world.xy
 }

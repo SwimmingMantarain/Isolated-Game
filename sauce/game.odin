@@ -21,7 +21,7 @@ import spall "core:prof/spall"
 import sapp "sokol/app"
 
 VERSION: string : "v0.0.0"
-WINDOW_TITLE :: "Template [bald]"
+WINDOW_TITLE :: "Isolated"
 GAME_RES_WIDTH :: 480
 GAME_RES_HEIGHT :: 270
 window_w := 1280
@@ -55,6 +55,9 @@ Game_State :: struct {
 	scratch:           struct {
 		all_entities: []Entity_Handle,
 	},
+
+	// the matrix
+	grid:              map[Vec2i]^Chunk,
 }
 
 //
@@ -68,6 +71,7 @@ action_map: map[Input_Action]Key_Code = {
 	.click    = .LEFT_MOUSE,
 	.use      = .RIGHT_MOUSE,
 	.interact = .E,
+	.quit     = .ESC,
 }
 
 Input_Action :: enum u8 {
@@ -78,6 +82,7 @@ Input_Action :: enum u8 {
 	click,
 	use,
 	interact,
+	quit,
 }
 
 //
@@ -105,6 +110,7 @@ Entity :: struct {
 	next_frame_end_time: f64,
 	loop:                bool,
 	frame_duration:      f32,
+	z_layer:             ZLayer,
 
 	// this gets zeroed every frame. Useful for passing data to other systems.
 	scratch:             struct {
@@ -115,6 +121,7 @@ Entity :: struct {
 Entity_Kind :: enum {
 	nil,
 	player,
+	conveyor,
 	thing1,
 }
 
@@ -122,6 +129,7 @@ entity_setup :: proc(e: ^Entity, kind: Entity_Kind) {
 	// entity defaults
 	e.draw_proc = draw_entity_default
 	e.draw_pivot = .bottom_center
+	e.z_layer = .playspace
 
 	switch kind {
 	case .nil:
@@ -129,7 +137,38 @@ entity_setup :: proc(e: ^Entity, kind: Entity_Kind) {
 		setup_player(e)
 	case .thing1:
 		setup_thing1(e)
+	case .conveyor:
+		setup_conveyor(e)
 	}
+}
+
+// big chunkus
+Chunk :: struct {
+	pos:   Vec2i,
+	tiles: [32][32]Tile,
+}
+
+init_chunk :: proc(c: ^Chunk) {
+	for x in 0 ..< 32 {
+		for y in 0 ..< 32 {
+			c.tiles[x][y] = Tile {
+				kind = .empty,
+			}
+		}
+	}
+}
+
+// game tile related things
+Tile :: struct {
+	kind:           TileKind,
+	sprite:         Sprite_Name,
+	anim_index:     int,
+	frame_duration: f32,
+}
+
+TileKind :: enum {
+	empty,
+	conveyor,
 }
 
 //
@@ -167,6 +206,8 @@ Sprite_Name :: enum {
 	player_death,
 	player_run,
 	player_idle,
+	conveyor,
+	empty_tile,
 	// to add new sprites, just put the .png in the res/images folder
 	// and add the name to the enum here
 	//
@@ -177,6 +218,7 @@ Sprite_Name :: enum {
 sprite_data: [Sprite_Name]Sprite_Data = #partial {
 	.player_idle = {frame_count = 2},
 	.player_run = {frame_count = 3},
+	.conveyor = {frame_count = 8},
 }
 
 Sprite_Data :: struct {
@@ -236,6 +278,10 @@ app_frame :: proc() {
 		fps := fmt.aprintf("FPS: %.1f", ctx.gs.smoothed_fps)
 		defer delete(fps)
 		draw_text({x, y}, fps, z_layer = .ui, pivot = utils.Pivot.top_left)
+
+		chunks_loaded := fmt.aprintf("Chunks Loaded: %v", len(ctx.gs.grid))
+		defer delete(chunks_loaded)
+		draw_text({x, y - 15}, chunks_loaded, z_layer = .ui, pivot = utils.Pivot.top_left)
 	}
 
 	//sound_play_continuously("event:/ambiance", "")
@@ -248,7 +294,11 @@ app_frame :: proc() {
 }
 
 app_shutdown :: proc() {
-	// called on exit
+	// cleanup chunkus
+	for k, v in ctx.gs.grid {
+		delete_key(&ctx.gs.grid, k)
+		free(v)
+	}
 }
 
 game_update :: proc() {
@@ -281,17 +331,63 @@ game_update :: proc() {
 		}
 	}
 
-	if key_pressed(.LEFT_MOUSE) {
-		consume_key_pressed(.LEFT_MOUSE)
-
-		pos := mouse_pos_in_current_space()
-		log.info("schloop at", pos)
-		//sound_play("event:/schloop", pos=pos)
+	if key_pressed(.ESC) {
+		consume_key_pressed(.ESC)
+		sapp.quit()
 	}
 
 	utils.animate_to_target_v2(&ctx.gs.cam_pos, get_player().pos, ctx.delta_t, rate = 10)
 
-	// ... add whatever other systems you need here to make epic game
+	// draw conveyor at mouse
+	pos := mouse_pos_in_current_space()
+	spos := Vec2{math.round_f32(pos.x / 10) * 10, math.round_f32(pos.y / 10) * 10}
+
+	draw_sprite(
+		spos,
+		.conveyor,
+		col = {0.8, 0.8, 0.8, 0.6},
+		col_override = {0.3, 0.3, 0.3, 0.1},
+		xform = utils.xform_scale(Vec2{0.3125, 0.3125}),
+		z_layer = .playspace,
+	)
+
+	// load chunks
+	player := get_player()
+	px := int(math.floor_f32(player.pos.x / 320))
+	py := int(math.floor_f32(player.pos.y / 320))
+	radius := 2 // TODO: not good
+	for x in -radius ..= radius {
+		for y in -radius ..= radius {
+			// chunkus player pos
+			pos := Vec2i{px + x, py + y}
+			_, exists := ctx.gs.grid[pos]
+			if !exists {
+				chunk := new(Chunk)
+				init_chunk(chunk)
+				chunk.pos = pos
+				ctx.gs.grid[pos] = chunk
+			}
+		}
+	}
+
+	// place conveyor if we so desire
+	if key_down(.LEFT_MOUSE) {
+
+		cpos := Vec2i{int(math.floor_f32(spos.x / 320)), int(math.floor_f32(spos.y / 320))}
+		c := ctx.gs.grid[cpos]
+
+		lx := spos.x - f32(cpos.x * 320)
+		ly := spos.y - f32(cpos.y * 320)
+
+		tx := int(lx / 10)
+		ty := int(ly / 10)
+
+		c.tiles[tx][ty] = Tile {
+			kind           = .conveyor,
+			sprite         = .conveyor,
+			frame_duration = 0.05,
+		}
+	}
 }
 
 rebuild_scratch_helpers :: proc() {
@@ -330,16 +426,52 @@ game_draw :: proc() {
 	{
 		push_coord_space(get_world_space())
 
-		draw_sprite({10, 10}, .player_still, col_override = Vec4{1, 0, 0, 0.4})
-		draw_sprite({-10, 10}, .player_still)
-
 		draw_text(
 			{0, -50},
-			"sugon",
+			"sugon deez nuts",
 			pivot = .bottom_center,
 			col = {0, 0, 0, 0.1},
 			drop_shadow_col = {},
 		)
+
+		// draw big chunkus tiles
+		player := get_player()
+		for _, chunk in ctx.gs.grid {
+			cx := f32(chunk.pos.x * 320)
+			cy := f32(chunk.pos.y * 320)
+
+			// debug shit
+			push_z_layer(.ui)
+			ccenter := Vec2{cx + 160, cy + 160}
+			draw_text(
+				ccenter,
+				fmt.tprintf("(%d, %d)", chunk.pos.x, chunk.pos.y),
+				z_layer = .ui,
+				col = {0, 0, 0, 0.5},
+			)
+
+			for x in 0 ..< 32 {
+				for y in 0 ..< 32 {
+					tile := chunk.tiles[x][y]
+					if tile.kind == .empty {continue}
+
+					tile_pos := Vec2{cx + f32(x) * 10, cy + f32(y) * 10}
+
+					if math.abs(tile_pos.x - player.pos.x) > 350 {continue}
+					if math.abs(tile_pos.y - player.pos.y) > 200 {continue}
+
+					update_tile_animation(&tile)
+
+					draw_sprite(
+						tile_pos,
+						tile.sprite,
+						xform = utils.xform_scale(Vec2{0.3125, 0.3125}),
+						z_layer = .background,
+						anim_index = tile.anim_index,
+					)
+				}
+			}
+		}
 
 		for handle in get_all_ents() {
 			e := entity_from_handle(handle)
@@ -367,6 +499,7 @@ draw_entity_default :: proc(e: Entity) {
 		xform = xform,
 		anim_index = e.anim_index,
 		draw_offset = e.draw_offset,
+		z_layer = e.z_layer,
 		flip_x = e.flip_x,
 		pivot = e.draw_pivot,
 	)
@@ -467,13 +600,34 @@ setup_player :: proc(e: ^Entity) {
 	}
 
 	e.draw_proc = proc(e: Entity) {
-		draw_sprite(e.pos, .shadow_medium, col = {1, 1, 1, 0.2})
+		draw_sprite(e.pos, .shadow_medium, col = {1, 1, 1, 0.2}, z_layer = .shadow)
 		draw_entity_default(e)
 	}
 }
 
 setup_thing1 :: proc(using e: ^Entity) {
 	kind = .thing1
+}
+
+setup_conveyor :: proc(using e: ^Entity) {
+	kind = .conveyor
+	sprite = .conveyor
+	draw_pivot = .center_center
+	z_layer = .background
+	loop = true
+	frame_duration = 0.1
+	entity_set_animation(e, .conveyor, 0.1)
+
+	draw_proc = proc(e: Entity) {
+		scale := utils.xform_scale(Vec2{0.3125, 0.3125}) // 32 * 0.3125 = 10
+		draw_sprite(
+			e.pos,
+			.conveyor,
+			z_layer = e.z_layer,
+			xform = scale,
+			anim_index = e.anim_index,
+		)
+	}
 }
 
 entity_set_animation :: proc(
@@ -490,6 +644,7 @@ entity_set_animation :: proc(
 		e.next_frame_end_time = 0
 	}
 }
+
 update_entity_animation :: proc(e: ^Entity) {
 	if e.frame_duration == 0 do return
 
@@ -509,14 +664,23 @@ update_entity_animation :: proc(e: ^Entity) {
 		if end_time_up(e.next_frame_end_time) {
 			e.anim_index += 1
 			e.next_frame_end_time = 0
-			//e.did_frame_advance = true
 			if e.anim_index >= frame_count {
 
 				if e.loop {
 					e.anim_index = 0
 				}
-
 			}
 		}
 	}
+}
+
+update_tile_animation :: proc(t: ^Tile) {
+	if t.frame_duration == 0 do return
+	if t.kind == .empty do return
+
+	frame_count := get_frame_count(t.sprite)
+
+	total_anim_time := f32(frame_count) * t.frame_duration
+	progress := math.mod(f32(ctx.gs.game_time_elapsed), total_anim_time)
+	t.anim_index = int(progress / t.frame_duration)
 }
