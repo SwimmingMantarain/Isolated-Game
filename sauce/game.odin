@@ -58,6 +58,7 @@ Game_State :: struct {
 
 	// the matrix
 	grid:              map[Vec2i]^Chunk,
+	tile_rot:          f32,
 }
 
 //
@@ -164,6 +165,7 @@ Tile :: struct {
 	sprite:         Sprite_Name,
 	anim_index:     int,
 	frame_duration: f32,
+	rotation:       f32,
 }
 
 TileKind :: enum {
@@ -258,7 +260,6 @@ get_sprite_center_mass :: proc(img: Sprite_Name) -> Vec2 {
 // main game procs
 
 app_init :: proc() {
-
 }
 
 app_frame :: proc() {
@@ -336,6 +337,14 @@ game_update :: proc() {
 		sapp.quit()
 	}
 
+	if key_pressed(.R) {
+		consume_key_pressed(.R)
+		ctx.gs.tile_rot += 90
+		if ctx.gs.tile_rot >= 360 {
+			ctx.gs.tile_rot = 0
+		}
+	}
+
 	utils.animate_to_target_v2(&ctx.gs.cam_pos, get_player().pos, ctx.delta_t, rate = 10)
 
 	// draw conveyor at mouse
@@ -347,7 +356,7 @@ game_update :: proc() {
 		.conveyor,
 		col = {0.8, 0.8, 0.8, 0.6},
 		col_override = {0.3, 0.3, 0.3, 0.1},
-		xform = utils.xform_scale(Vec2{0.3125, 0.3125}),
+		xform = utils.xform_scale(Vec2{0.3125, 0.3125}) * utils.xform_rotate(ctx.gs.tile_rot),
 		z_layer = .playspace,
 	)
 
@@ -386,6 +395,33 @@ game_update :: proc() {
 			kind           = .conveyor,
 			sprite         = .conveyor,
 			frame_duration = 0.05,
+			rotation       = ctx.gs.tile_rot,
+		}
+	}
+
+	// move player if on conveyor
+	snap_pos := Vec2{math.round_f32(player.pos.x / 10) * 10, math.round_f32(player.pos.y / 10) * 10}
+	cpos := Vec2i{int(math.floor_f32(snap_pos.x / 320)), int(math.floor_f32(snap_pos.y / 320))}
+	c := ctx.gs.grid[cpos]
+
+	lx := snap_pos.x - f32(cpos.x * 320)
+	ly := snap_pos.y - f32(cpos.y * 320)
+
+	tx := int(lx / 10)
+	ty := int(ly / 10)
+
+	tile := c.tiles[tx][ty]
+
+	if tile.kind == .conveyor {
+		switch (tile.rotation) {
+		case 0:
+			player.pos.x -= 0.4
+		case 90:
+			player.pos.y -= 0.4
+		case 180:
+			player.pos.x += 0.4
+		case 270:
+			player.pos.y += 0.4
 		}
 	}
 }
@@ -446,7 +482,7 @@ game_draw :: proc() {
 			draw_text(
 				ccenter,
 				fmt.tprintf("(%d, %d)", chunk.pos.x, chunk.pos.y),
-				z_layer = .ui,
+				z_layer = .background,
 				col = {0, 0, 0, 0.5},
 			)
 
@@ -465,7 +501,8 @@ game_draw :: proc() {
 					draw_sprite(
 						tile_pos,
 						tile.sprite,
-						xform = utils.xform_scale(Vec2{0.3125, 0.3125}),
+						xform = utils.xform_scale(Vec2{0.3125, 0.3125}) *
+						utils.xform_rotate(tile.rotation),
 						z_layer = .background,
 						anim_index = tile.anim_index,
 					)
