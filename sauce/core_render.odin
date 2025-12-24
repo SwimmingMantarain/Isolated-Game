@@ -344,8 +344,8 @@ Atlas :: struct {
 atlas: Atlas
 
 
-font_bitmap_w :: 256
-font_bitmap_h :: 256
+font_bitmap_w :: 1024
+font_bitmap_h :: 1024
 char_count :: 96
 Font :: struct {
 	char_data: [char_count]tt.bakedchar,
@@ -359,8 +359,8 @@ load_font :: proc() {
 	using tt
 
 	bitmap, _ := mem.alloc(font_bitmap_w * font_bitmap_h)
-	font_height := 15 // for some reason this only bakes properly at 15 ? it's a 16px font dou...
-	path := "res/fonts/alagard.ttf" // #user
+	font_height := 120
+	path := "res/fonts/TitilliumWeb-Regular.ttf" // #user
 	ttf_data, err := os.read_entire_file(path)
 	assert(ttf_data != nil, "failed to read font")
 
@@ -377,9 +377,7 @@ load_font :: proc() {
 	)
 	assert(ret > 0, "not enough space in bitmap")
 
-	when ODIN_OS == .Windows {
-		//stbi.write_png("font.png", auto_cast font_bitmap_w, auto_cast font_bitmap_h, 1, bitmap, auto_cast font_bitmap_w)
-	}
+	// stbi.write_png("font.png", auto_cast font_bitmap_w, auto_cast font_bitmap_h, 1, bitmap, auto_cast font_bitmap_w)
 
 	// setup sg image so we can use it in the shader (August 2025 API - mip_levels structure + views)
 	desc: sg.Image_Desc

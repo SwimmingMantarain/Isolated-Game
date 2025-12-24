@@ -27,7 +27,7 @@ draw_text_with_drop_shadow :: proc(
 	text: string,
 	drop_shadow_col := color.BLACK,
 	col := color.WHITE,
-	scale := 1.0,
+	scale := 0.2,
 	pivot := utils.Pivot.bottom_left,
 	z_layer := ZLayer.nil,
 	col_override := Vec4{0, 0, 0, 0},
@@ -172,4 +172,3 @@ draw_text_no_drop_shadow :: proc(
 
 	return total_size * f32(scale)
 }
-

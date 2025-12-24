@@ -60,6 +60,11 @@ Game_State :: struct {
 	grid:              map[Vec2i]^Chunk,
 	tiles:             map[Vec2]Tile, // this seems yucky
 	tile_rot:          f32,
+	tile_selected:     Sprite_Name,
+
+	// UIUIUIUIUIUI
+	show_e:            bool,
+	windows:           map[string]Window,
 }
 
 //
@@ -148,6 +153,8 @@ entity_setup :: proc(e: ^Entity, kind: Entity_Kind) {
 Chunk :: struct {
 	pos:   Vec2i,
 	floor: [32][32]Floor,
+	// add decor here
+	stuff: [32][32]Stuff,
 }
 
 init_chunk :: proc(c: ^Chunk) {
@@ -157,7 +164,17 @@ init_chunk :: proc(c: ^Chunk) {
 				kind   = .floor,
 				sprite = .empty_floor,
 			}
+
+			c.stuff[x][y] = Stuff {
+				kind = .empty,
+			}
 		}
+	}
+
+	c.stuff[6][7] = Stuff {
+		kind   = .iron_ore,
+		sprite = .iron_ore,
+		amount = 69,
 	}
 }
 
@@ -186,6 +203,17 @@ FloorKind :: enum {
 	grass,
 }
 
+Stuff :: struct {
+	kind:   StuffKind,
+	amount: int,
+	sprite: Sprite_Name,
+}
+
+StuffKind :: enum {
+	empty,
+	iron_ore,
+}
+
 //
 // game :draw related things
 
@@ -204,6 +232,7 @@ ZLayer :: enum u8 {
 	background,
 	shadow,
 	playspace,
+	top_tile,
 	vfx,
 	ui,
 	tooltip,
@@ -217,13 +246,14 @@ Sprite_Name :: enum {
 	fmod_logo,
 	player_still,
 	shadow_medium,
-	bg_repeat_tex0,
 	player_death,
 	player_run,
 	player_idle,
 	conveyor,
 	empty_tile,
 	empty_floor,
+	iron_ore,
+	inventory,
 	// to add new sprites, just put the .png in the res/images folder
 	// and add the name to the enum here
 	//
@@ -281,24 +311,6 @@ app_frame :: proc() {
 	// right now we are just calling the game update, but in future this is where you'd do a big
 	// "UX" switch for startup splash, main menu, settings, in-game, etc
 
-	{
-		// ui space example
-		push_coord_space(get_screen_space())
-
-		x, y := screen_pivot(.top_left)
-		x += 2
-		y -= 2
-		current_fps := f32(1 / ctx.delta_t)
-		ctx.gs.smoothed_fps = math.lerp(ctx.gs.smoothed_fps, current_fps, f32(0.1))
-		fps := fmt.aprintf("FPS: %.1f", ctx.gs.smoothed_fps)
-		defer delete(fps)
-		draw_text({x, y}, fps, z_layer = .ui, pivot = utils.Pivot.top_left)
-
-		chunks_loaded := fmt.aprintf("Chunks Loaded: %v", len(ctx.gs.grid))
-		defer delete(chunks_loaded)
-		draw_text({x, y - 15}, chunks_loaded, z_layer = .ui, pivot = utils.Pivot.top_left)
-	}
-
 	//sound_play_continuously("event:/ambiance", "")
 
 	game_update()
@@ -331,6 +343,25 @@ game_update :: proc() {
 	if ctx.gs.ticks == 0 {
 		player := entity_create(.player)
 		ctx.gs.player_handle = player.handle
+
+		ctx.gs.tile_selected = .empty_tile
+
+		w := make_window(
+			"inventory",
+			Vec2{GAME_RES_WIDTH / 2, GAME_RES_HEIGHT / 2},
+			Vec2{250, 150},
+			.inventory,
+		)
+
+		w.draw_proc = proc(w: ^Window) {
+			draw_window_default(w)
+			current_fps := f32(1 / ctx.delta_t)
+			ctx.gs.smoothed_fps = math.lerp(ctx.gs.smoothed_fps, current_fps, f32(0.1))
+			fps := fmt.tprintf("FPS: %.1f", ctx.gs.smoothed_fps)
+			draw_window_text(w, fps, {8, 8}, utils.Pivot.top_left)
+		}
+
+		ctx.gs.windows["inventory"] = w
 	}
 
 	rebuild_scratch_helpers()
@@ -359,20 +390,12 @@ game_update :: proc() {
 		}
 	}
 
+	if key_pressed(.E) {
+		consume_key_pressed(.E)
+		ctx.gs.show_e = !ctx.gs.show_e
+	}
+
 	utils.animate_to_target_v2(&ctx.gs.cam_pos, get_player().pos, ctx.delta_t, rate = 10)
-
-	// draw conveyor at mouse
-	pos := mouse_pos_in_current_space()
-	spos := Vec2{math.round_f32(pos.x / 10) * 10, math.round_f32(pos.y / 10) * 10}
-
-	draw_sprite(
-		spos,
-		.conveyor,
-		col = {0.8, 0.8, 0.8, 0.6},
-		col_override = {0.3, 0.3, 0.3, 0.1},
-		xform = utils.xform_scale(Vec2{0.3125, 0.3125}) * utils.xform_rotate(ctx.gs.tile_rot),
-		z_layer = .playspace,
-	)
 
 	// load chunks
 	player := get_player()
@@ -393,6 +416,9 @@ game_update :: proc() {
 		}
 	}
 
+	pos := mouse_pos_in_current_space()
+	spos := Vec2{math.round_f32(pos.x / 10) * 10, math.round_f32(pos.y / 10) * 10}
+
 	// place conveyor if we so desire
 	if key_down(.LEFT_MOUSE) {
 		tile := Tile {
@@ -404,6 +430,38 @@ game_update :: proc() {
 		}
 
 		ctx.gs.tiles[spos] = tile
+	}
+
+	if key_pressed(.RIGHT_MOUSE) {
+		tile := Tile {
+			kind = .empty,
+			pos  = spos,
+		}
+
+		if (ctx.gs.tiles[spos].kind != .empty) {
+			ctx.gs.tiles[spos] = tile
+		} else {
+			cpos := Vec2i{int(math.floor_f32(spos.x / 320)), int(math.floor_f32(spos.y / 320))}
+			c := ctx.gs.grid[cpos]
+
+			lx := spos.x - f32(cpos.x * 320)
+			ly := spos.y - f32(cpos.y * 320)
+
+			tx := int(lx / 10)
+			ty := int(ly / 10)
+
+			stuff := &c.stuff[tx][ty]
+
+			if (stuff.kind != .empty) {
+				if (stuff.amount <= 1) {
+					stuff.amount = 0
+					stuff.kind = .empty
+					stuff.sprite = .nil
+				} else {
+					stuff.amount -= 1
+				}
+			}
+		}
 	}
 
 	// move player if on conveyor
@@ -450,19 +508,15 @@ game_draw :: proc() {
 	// this is so we can get the current pixel in the shader in world space (VERYYY useful)
 	draw_frame.ndc_to_world_xform =
 		get_world_space_camera() * linalg.inverse(get_world_space_proj())
-	draw_frame.bg_repeat_tex0_atlas_uv = atlas_uv_from_sprite(.bg_repeat_tex0)
-
-	// background thing
-	{
-		// identity matrices, so we're in clip space
-		push_coord_space({proj = Matrix4(1), camera = Matrix4(1)})
-
-		// draw rect that covers the whole screen
-		draw_rect(shape.Rect{-1, -1, 1, 1}, flags = .background_pixels) // we leave it in the hands of the shader
-	}
 
 	// world
 	{
+		push_coord_space(get_screen_space())
+		if (ctx.gs.show_e) {
+			w := ctx.gs.windows["inventory"]
+			draw_window(&w)
+		}
+
 		push_coord_space(get_world_space())
 
 		// draw big chunkus tiles
@@ -480,11 +534,20 @@ game_draw :: proc() {
 					if math.abs(fpos.x - player.pos.x) > 350 {continue}
 					if math.abs(fpos.y - player.pos.y) > 200 {continue}
 
-
 					// draw floor
 					draw_sprite(
 						fpos,
 						floor.sprite,
+						xform = utils.xform_scale(Vec2{0.3125, 0.3125}),
+						z_layer = .background,
+					)
+
+					stuff := chunk.stuff[x][y]
+
+					// draw stuff
+					draw_sprite(
+						fpos,
+						stuff.sprite,
 						xform = utils.xform_scale(Vec2{0.3125, 0.3125}),
 						z_layer = .background,
 					)
@@ -506,6 +569,36 @@ game_draw :: proc() {
 				z_layer = .background,
 				anim_index = tile.anim_index,
 			)
+		}
+
+		// draw tile at mouse
+		pos := mouse_pos_in_current_space()
+		spos := Vec2{math.round_f32(pos.x / 10) * 10, math.round_f32(pos.y / 10) * 10}
+
+		draw_sprite(
+			spos,
+			ctx.gs.tile_selected,
+			col = {0.8, 0.8, 0.8, 0.6},
+			col_override = {0.3, 0.3, 0.3, 0.1},
+			xform = utils.xform_scale(Vec2{0.3125, 0.3125}) * utils.xform_rotate(ctx.gs.tile_rot),
+			z_layer = .top_tile,
+		)
+
+		// draw amount of stuff if stuff
+		cpos := Vec2i{int(math.floor_f32(spos.x / 320)), int(math.floor_f32(spos.y / 320))}
+		c := ctx.gs.grid[cpos]
+
+		lx := spos.x - f32(cpos.x * 320)
+		ly := spos.y - f32(cpos.y * 320)
+
+		tx := int(lx / 10)
+		ty := int(ly / 10)
+
+		stuff := c.stuff[tx][ty]
+
+		if (stuff.kind != .empty) {
+			amount := fmt.aprintf("%s: %d", stuff.kind, stuff.amount)
+			draw_text(Vec2{spos.x + 5, spos.y + 5.5}, amount, scale = 0.15, z_layer = .ui)
 		}
 
 		for handle in get_all_ents() {
