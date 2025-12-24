@@ -58,6 +58,7 @@ Game_State :: struct {
 
 	// the matrix
 	grid:              map[Vec2i]^Chunk,
+	tiles:             map[Vec2]Tile, // this seems yucky
 	tile_rot:          f32,
 }
 
@@ -146,14 +147,15 @@ entity_setup :: proc(e: ^Entity, kind: Entity_Kind) {
 // big chunkus
 Chunk :: struct {
 	pos:   Vec2i,
-	tiles: [32][32]Tile,
+	floor: [32][32]Floor,
 }
 
 init_chunk :: proc(c: ^Chunk) {
 	for x in 0 ..< 32 {
 		for y in 0 ..< 32 {
-			c.tiles[x][y] = Tile {
-				kind = .empty,
+			c.floor[x][y] = Floor {
+				kind   = .floor,
+				sprite = .empty_floor,
 			}
 		}
 	}
@@ -162,6 +164,7 @@ init_chunk :: proc(c: ^Chunk) {
 // game tile related things
 Tile :: struct {
 	kind:           TileKind,
+	pos:            Vec2,
 	sprite:         Sprite_Name,
 	anim_index:     int,
 	frame_duration: f32,
@@ -171,6 +174,16 @@ Tile :: struct {
 TileKind :: enum {
 	empty,
 	conveyor,
+}
+
+Floor :: struct {
+	kind:   FloorKind,
+	sprite: Sprite_Name,
+}
+
+FloorKind :: enum {
+	floor,
+	grass,
 }
 
 //
@@ -210,6 +223,7 @@ Sprite_Name :: enum {
 	player_idle,
 	conveyor,
 	empty_tile,
+	empty_floor,
 	// to add new sprites, just put the .png in the res/images folder
 	// and add the name to the enum here
 	//
@@ -381,47 +395,36 @@ game_update :: proc() {
 
 	// place conveyor if we so desire
 	if key_down(.LEFT_MOUSE) {
-
-		cpos := Vec2i{int(math.floor_f32(spos.x / 320)), int(math.floor_f32(spos.y / 320))}
-		c := ctx.gs.grid[cpos]
-
-		lx := spos.x - f32(cpos.x * 320)
-		ly := spos.y - f32(cpos.y * 320)
-
-		tx := int(lx / 10)
-		ty := int(ly / 10)
-
-		c.tiles[tx][ty] = Tile {
+		tile := Tile {
 			kind           = .conveyor,
+			pos            = spos,
 			sprite         = .conveyor,
 			frame_duration = 0.05,
 			rotation       = ctx.gs.tile_rot,
 		}
+
+		ctx.gs.tiles[spos] = tile
 	}
 
 	// move player if on conveyor
-	snap_pos := Vec2{math.round_f32(player.pos.x / 10) * 10, math.round_f32(player.pos.y / 10) * 10}
-	cpos := Vec2i{int(math.floor_f32(snap_pos.x / 320)), int(math.floor_f32(snap_pos.y / 320))}
-	c := ctx.gs.grid[cpos]
+	snap_pos := Vec2 {
+		math.round_f32(player.pos.x / 10) * 10,
+		math.round_f32(player.pos.y / 10) * 10,
+	}
 
-	lx := snap_pos.x - f32(cpos.x * 320)
-	ly := snap_pos.y - f32(cpos.y * 320)
+	tile := ctx.gs.tiles[snap_pos]
 
-	tx := int(lx / 10)
-	ty := int(ly / 10)
-
-	tile := c.tiles[tx][ty]
-
+	conveyor_speed := 25 * ctx.delta_t
 	if tile.kind == .conveyor {
 		switch (tile.rotation) {
 		case 0:
-			player.pos.x -= 0.4
+			player.pos.x -= conveyor_speed
 		case 90:
-			player.pos.y -= 0.4
+			player.pos.y -= conveyor_speed
 		case 180:
-			player.pos.x += 0.4
+			player.pos.x += conveyor_speed
 		case 270:
-			player.pos.y += 0.4
+			player.pos.y += conveyor_speed
 		}
 	}
 }
@@ -462,52 +465,47 @@ game_draw :: proc() {
 	{
 		push_coord_space(get_world_space())
 
-		draw_text(
-			{0, -50},
-			"sugon deez nuts",
-			pivot = .bottom_center,
-			col = {0, 0, 0, 0.1},
-			drop_shadow_col = {},
-		)
-
 		// draw big chunkus tiles
 		player := get_player()
 		for _, chunk in ctx.gs.grid {
 			cx := f32(chunk.pos.x * 320)
 			cy := f32(chunk.pos.y * 320)
 
-			// debug shit
-			push_z_layer(.ui)
-			ccenter := Vec2{cx + 160, cy + 160}
-			draw_text(
-				ccenter,
-				fmt.tprintf("(%d, %d)", chunk.pos.x, chunk.pos.y),
-				z_layer = .background,
-				col = {0, 0, 0, 0.5},
-			)
-
 			for x in 0 ..< 32 {
 				for y in 0 ..< 32 {
-					tile := chunk.tiles[x][y]
-					if tile.kind == .empty {continue}
+					floor := chunk.floor[x][y]
 
-					tile_pos := Vec2{cx + f32(x) * 10, cy + f32(y) * 10}
+					fpos := Vec2{cx + f32(x) * 10, cy + f32(y) * 10}
 
-					if math.abs(tile_pos.x - player.pos.x) > 350 {continue}
-					if math.abs(tile_pos.y - player.pos.y) > 200 {continue}
+					if math.abs(fpos.x - player.pos.x) > 350 {continue}
+					if math.abs(fpos.y - player.pos.y) > 200 {continue}
 
-					update_tile_animation(&tile)
 
+					// draw floor
 					draw_sprite(
-						tile_pos,
-						tile.sprite,
-						xform = utils.xform_scale(Vec2{0.3125, 0.3125}) *
-						utils.xform_rotate(tile.rotation),
+						fpos,
+						floor.sprite,
+						xform = utils.xform_scale(Vec2{0.3125, 0.3125}),
 						z_layer = .background,
-						anim_index = tile.anim_index,
 					)
 				}
 			}
+		}
+
+		for _, &tile in ctx.gs.tiles {
+			if tile.kind == .empty {continue}
+
+			update_tile_animation(&tile)
+
+			// draw tile
+			draw_sprite(
+				tile.pos,
+				tile.sprite,
+				xform = utils.xform_scale(Vec2{0.3125, 0.3125}) *
+				utils.xform_rotate(tile.rotation),
+				z_layer = .background,
+				anim_index = tile.anim_index,
+			)
 		}
 
 		for handle in get_all_ents() {
@@ -651,20 +649,6 @@ setup_conveyor :: proc(using e: ^Entity) {
 	sprite = .conveyor
 	draw_pivot = .center_center
 	z_layer = .background
-	loop = true
-	frame_duration = 0.1
-	entity_set_animation(e, .conveyor, 0.1)
-
-	draw_proc = proc(e: Entity) {
-		scale := utils.xform_scale(Vec2{0.3125, 0.3125}) // 32 * 0.3125 = 10
-		draw_sprite(
-			e.pos,
-			.conveyor,
-			z_layer = e.z_layer,
-			xform = scale,
-			anim_index = e.anim_index,
-		)
-	}
 }
 
 entity_set_animation :: proc(
