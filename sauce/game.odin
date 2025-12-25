@@ -60,7 +60,7 @@ Game_State :: struct {
 	grid:              map[Vec2i]^Chunk,
 	tiles:             map[Vec2]Tile, // this seems yucky
 	tile_rot:          f32,
-	tile_selected:     Sprite_Name,
+	tile_selected:     TileKind,
 
 	// UIUIUIUIUIUI
 	show_e:            bool,
@@ -128,8 +128,7 @@ Entity :: struct {
 Entity_Kind :: enum {
 	nil,
 	player,
-	conveyor,
-	thing1,
+	item_iron_ore,
 }
 
 entity_setup :: proc(e: ^Entity, kind: Entity_Kind) {
@@ -138,14 +137,11 @@ entity_setup :: proc(e: ^Entity, kind: Entity_Kind) {
 	e.draw_pivot = .bottom_center
 	e.z_layer = .playspace
 
-	switch kind {
-	case .nil:
+	#partial switch kind {
 	case .player:
 		setup_player(e)
-	case .thing1:
-		setup_thing1(e)
-	case .conveyor:
-		setup_conveyor(e)
+	case .item_iron_ore:
+		setup_item_iron_ore(e)
 	}
 }
 
@@ -186,11 +182,51 @@ Tile :: struct {
 	anim_index:     int,
 	frame_duration: f32,
 	rotation:       f32,
+	progress:       f32,
+	time:           f32,
+	time_it_takes:  f32, // secs
 }
 
 TileKind :: enum {
 	empty,
 	conveyor,
+	basic_miner,
+}
+
+make_tile :: proc(kind: TileKind, pos: Vec2, rot: f32) -> Tile {
+	#partial switch kind {
+	case .conveyor:
+		return Tile {
+			kind = .conveyor,
+			pos = pos,
+			sprite = .conveyor,
+			frame_duration = 0.05,
+			rotation = rot,
+		}
+	case .basic_miner:
+		return Tile {
+			kind          = .basic_miner,
+			pos           = pos,
+			sprite        = .basic_miner,
+			rotation      = rot,
+			progress      = 0,
+			time          = 0,
+			time_it_takes = 5, // secs
+		}
+	}
+
+	return Tile{kind = .empty}
+}
+
+tile_sprite :: proc(kind: TileKind) -> Sprite_Name {
+	#partial switch kind {
+	case .conveyor:
+		{return .conveyor}
+	case .basic_miner:
+		{return .basic_miner}
+	}
+
+	return .empty_tile
 }
 
 Floor :: struct {
@@ -254,6 +290,8 @@ Sprite_Name :: enum {
 	empty_floor,
 	iron_ore,
 	inventory,
+	basic_miner,
+	item_iron_ore,
 	// to add new sprites, just put the .png in the res/images folder
 	// and add the name to the enum here
 	//
@@ -344,7 +382,7 @@ game_update :: proc() {
 		player := entity_create(.player)
 		ctx.gs.player_handle = player.handle
 
-		ctx.gs.tile_selected = .empty_tile
+		ctx.gs.tile_selected = .empty
 
 		w := make_window(
 			"inventory",
@@ -395,6 +433,21 @@ game_update :: proc() {
 		ctx.gs.show_e = !ctx.gs.show_e
 	}
 
+	if key_pressed(._1) {
+		consume_key_pressed(._1)
+		ctx.gs.tile_selected = .empty
+	}
+
+	if key_pressed(._2) {
+		consume_key_pressed(._2)
+		ctx.gs.tile_selected = .conveyor
+	}
+
+	if key_pressed(._3) {
+		consume_key_pressed(._3)
+		ctx.gs.tile_selected = .basic_miner
+	}
+
 	utils.animate_to_target_v2(&ctx.gs.cam_pos, get_player().pos, ctx.delta_t, rate = 10)
 
 	// load chunks
@@ -419,15 +472,9 @@ game_update :: proc() {
 	pos := mouse_pos_in_current_space()
 	spos := Vec2{math.round_f32(pos.x / 10) * 10, math.round_f32(pos.y / 10) * 10}
 
-	// place conveyor if we so desire
-	if key_down(.LEFT_MOUSE) {
-		tile := Tile {
-			kind           = .conveyor,
-			pos            = spos,
-			sprite         = .conveyor,
-			frame_duration = 0.05,
-			rotation       = ctx.gs.tile_rot,
-		}
+	// place tile if we so desire
+	if key_down(.LEFT_MOUSE) && ctx.gs.tile_selected != .empty {
+		tile := make_tile(ctx.gs.tile_selected, spos, ctx.gs.tile_rot)
 
 		ctx.gs.tiles[spos] = tile
 	}
@@ -483,6 +530,42 @@ game_update :: proc() {
 			player.pos.x += conveyor_speed
 		case 270:
 			player.pos.y += conveyor_speed
+		}
+	}
+
+	// update tiles
+	for _, &tile in ctx.gs.tiles {
+		if tile.kind == .basic_miner {
+			cpos := Vec2i {
+				int(math.floor_f32(tile.pos.x / 320)),
+				int(math.floor_f32(tile.pos.y / 320)),
+			}
+
+			c := ctx.gs.grid[cpos]
+
+			lx := tile.pos.x - f32(cpos.x * 320)
+			ly := tile.pos.y - f32(cpos.y * 320)
+
+			tx := int(lx / 10)
+			ty := int(ly / 10)
+
+			stuff := &c.stuff[tx][ty]
+			if stuff.kind == .empty {continue}
+
+			tile.time += ctx.delta_t
+
+			if tile.time >= tile.time_it_takes {
+				// mine
+				if stuff.amount <= 1 {
+					stuff.amount = 0
+					stuff.kind = .empty
+					stuff.sprite = .nil
+				} else {
+					stuff.amount -= 1
+				}
+
+				tile.time = 0
+			}
 		}
 	}
 }
@@ -577,7 +660,7 @@ game_draw :: proc() {
 
 		draw_sprite(
 			spos,
-			ctx.gs.tile_selected,
+			tile_sprite(ctx.gs.tile_selected),
 			col = {0.8, 0.8, 0.8, 0.6},
 			col_override = {0.3, 0.3, 0.3, 0.1},
 			xform = utils.xform_scale(Vec2{0.3125, 0.3125}) * utils.xform_rotate(ctx.gs.tile_rot),
@@ -598,7 +681,19 @@ game_draw :: proc() {
 
 		if (stuff.kind != .empty) {
 			amount := fmt.aprintf("%s: %d", stuff.kind, stuff.amount)
-			draw_text(Vec2{spos.x + 5, spos.y + 5.5}, amount, scale = 0.15, z_layer = .ui)
+			draw_text(Vec2{spos.x + 5, spos.y + 5.5}, amount, scale = 0.15, z_layer = .top_tile)
+
+			tile := ctx.gs.tiles[spos]
+			if tile.kind == .basic_miner {
+				progress_int := int(tile.time / tile.time_it_takes * 100)
+				progress := fmt.aprintf("%d%%", progress_int)
+				draw_text(
+					Vec2{spos.x + 5, spos.y - 5.5},
+					progress,
+					scale = 0.15,
+					z_layer = .top_tile,
+				)
+			}
 		}
 
 		for handle in get_all_ents() {
@@ -733,15 +828,11 @@ setup_player :: proc(e: ^Entity) {
 	}
 }
 
-setup_thing1 :: proc(using e: ^Entity) {
-	kind = .thing1
-}
-
-setup_conveyor :: proc(using e: ^Entity) {
-	kind = .conveyor
-	sprite = .conveyor
+setup_item_iron_ore :: proc(using e: ^Entity) {
+	kind = .item_iron_ore
+	sprite = .item_iron_ore
 	draw_pivot = .center_center
-	z_layer = .background
+	z_layer = .playspace
 }
 
 entity_set_animation :: proc(
