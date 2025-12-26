@@ -59,7 +59,7 @@ Game_State :: struct {
 	// the matrix
 	grid:              map[Vec2i]^Chunk,
 	tiles:             map[Vec2]Tile, // this seems yucky
-	tile_rot:          f32,
+	tile_rot:          Rotation,
 	tile_selected:     TileKind,
 
 	// UIUIUIUIUIUI
@@ -181,10 +181,47 @@ Tile :: struct {
 	sprite:         Sprite_Name,
 	anim_index:     int,
 	frame_duration: f32,
-	rotation:       f32,
+	rotation:       Rotation,
 	progress:       f32,
 	time:           f32,
 	time_it_takes:  f32, // secs
+}
+
+Rotation :: enum {
+	left,
+	up,
+	right,
+	down,
+}
+
+next_rot :: proc(rot: Rotation) -> Rotation {
+	switch rot {
+	case .left:
+		return .up
+	case .up:
+		return .right
+	case .right:
+		return .down
+	case .down:
+		return .left
+	}
+
+	return .left
+}
+
+rot :: proc(rot: Rotation) -> f32 {
+	switch rot {
+	case .left:
+		return 0
+	case .down:
+		return 90
+	case .right:
+		return 180
+	case .up:
+		return 270
+	}
+
+	return 0
 }
 
 TileKind :: enum {
@@ -193,7 +230,7 @@ TileKind :: enum {
 	basic_miner,
 }
 
-make_tile :: proc(kind: TileKind, pos: Vec2, rot: f32) -> Tile {
+make_tile :: proc(kind: TileKind, pos: Vec2, rot: Rotation) -> Tile {
 	#partial switch kind {
 	case .conveyor:
 		return Tile {
@@ -422,10 +459,7 @@ game_update :: proc() {
 
 	if key_pressed(.R) {
 		consume_key_pressed(.R)
-		ctx.gs.tile_rot += 90
-		if ctx.gs.tile_rot >= 360 {
-			ctx.gs.tile_rot = 0
-		}
+		ctx.gs.tile_rot = next_rot(ctx.gs.tile_rot)
 	}
 
 	if key_pressed(.E) {
@@ -522,13 +556,13 @@ game_update :: proc() {
 	conveyor_speed := 25 * ctx.delta_t
 	if tile.kind == .conveyor {
 		switch (tile.rotation) {
-		case 0:
+		case .left:
 			player.pos.x -= conveyor_speed
-		case 90:
+		case .down:
 			player.pos.y -= conveyor_speed
-		case 180:
+		case .right:
 			player.pos.x += conveyor_speed
-		case 270:
+		case .up:
 			player.pos.y += conveyor_speed
 		}
 	}
@@ -552,7 +586,6 @@ game_update :: proc() {
 			stuff := &c.stuff[tx][ty]
 			if stuff.kind == .empty {continue}
 
-			tile.time += ctx.delta_t
 
 			if tile.time >= tile.time_it_takes {
 				// mine
@@ -565,6 +598,8 @@ game_update :: proc() {
 				}
 
 				tile.time = 0
+			} else {
+				tile.time += ctx.delta_t
 			}
 		}
 	}
@@ -648,7 +683,7 @@ game_draw :: proc() {
 				tile.pos,
 				tile.sprite,
 				xform = utils.xform_scale(Vec2{0.3125, 0.3125}) *
-				utils.xform_rotate(tile.rotation),
+				utils.xform_rotate(rot(tile.rotation)),
 				z_layer = .background,
 				anim_index = tile.anim_index,
 			)
@@ -663,7 +698,8 @@ game_draw :: proc() {
 			tile_sprite(ctx.gs.tile_selected),
 			col = {0.8, 0.8, 0.8, 0.6},
 			col_override = {0.3, 0.3, 0.3, 0.1},
-			xform = utils.xform_scale(Vec2{0.3125, 0.3125}) * utils.xform_rotate(ctx.gs.tile_rot),
+			xform = utils.xform_scale(Vec2{0.3125, 0.3125}) *
+			utils.xform_rotate(rot(ctx.gs.tile_rot)),
 			z_layer = .top_tile,
 		)
 
