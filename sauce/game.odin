@@ -59,6 +59,7 @@ Game_State :: struct {
 	// the matrix
 	grid:              map[Vec2i]^Chunk,
 	tiles:             map[Vec2]Tile, // this seems yucky
+	items:             map[Vec2]Item, // even more yucky
 	tile_rot:          Rotation,
 	tile_selected:     TileKind,
 
@@ -212,13 +213,13 @@ next_rot :: proc(rot: Rotation) -> Rotation {
 rot :: proc(rot: Rotation) -> f32 {
 	switch rot {
 	case .left:
-		return 0
-	case .down:
-		return 90
-	case .right:
-		return 180
-	case .up:
 		return 270
+	case .down:
+		return 0
+	case .right:
+		return 90
+	case .up:
+		return 180
 	}
 
 	return 0
@@ -287,7 +288,41 @@ StuffKind :: enum {
 	iron_ore,
 }
 
-//
+item_sprite_from_stuff :: proc(stuff: ^Stuff) -> Sprite_Name {
+	#partial switch stuff.kind {
+	case .iron_ore:
+		return .item_iron_ore
+	}
+
+	return .nil
+}
+
+Item :: struct {
+	kind: Sprite_Name,
+	pos:  Vec2,
+}
+
+can_place_item :: proc(rot: Rotation, pos: Vec2) -> (valid_pos: Vec2, ok: bool) {
+	positions: []Vec2
+	switch rot {
+	case .left:
+		positions = {Vec2{pos.x - 10, pos.y + 5}, Vec2{pos.x - 10, pos.y}}
+	case .right:
+		positions = {Vec2{pos.x + 5, pos.y + 5}, Vec2{pos.x + 5, pos.y}}
+	case .up:
+		positions = {Vec2{pos.x - 5, pos.y + 10}, Vec2{pos.x, pos.y + 10}}
+	case .down:
+		positions = {Vec2{pos.x - 5, pos.y - 5}, Vec2{pos.x, pos.y - 5}}
+	}
+
+	for p in positions {
+		item, ok := ctx.gs.items[p]
+		if ok {continue} else {return p, true}
+	}
+
+	return {0, 0}, false
+}
+
 // game :draw related things
 
 Quad_Flags :: enum u8 {
@@ -420,6 +455,7 @@ game_update :: proc() {
 		ctx.gs.player_handle = player.handle
 
 		ctx.gs.tile_selected = .empty
+		ctx.gs.tile_rot = .left
 
 		w := make_window(
 			"inventory",
@@ -460,6 +496,15 @@ game_update :: proc() {
 	if key_pressed(.R) {
 		consume_key_pressed(.R)
 		ctx.gs.tile_rot = next_rot(ctx.gs.tile_rot)
+
+		pos := mouse_pos_in_current_space()
+		spos := Vec2{math.round_f32(pos.x / 10) * 10, math.round_f32(pos.y / 10) * 10}
+
+		tile := &ctx.gs.tiles[spos]
+
+		if tile.kind != .empty {
+			tile.rotation = next_rot(tile.rotation)
+		}
 	}
 
 	if key_pressed(.E) {
@@ -586,8 +631,10 @@ game_update :: proc() {
 			stuff := &c.stuff[tx][ty]
 			if stuff.kind == .empty {continue}
 
-
 			if tile.time >= tile.time_it_takes {
+				pos, ok := can_place_item(tile.rotation, tile.pos)
+				if !ok {continue}
+
 				// mine
 				if stuff.amount <= 1 {
 					stuff.amount = 0
@@ -596,6 +643,16 @@ game_update :: proc() {
 				} else {
 					stuff.amount -= 1
 				}
+
+				item_sprite := item_sprite_from_stuff(stuff)
+
+				// place
+				item := Item {
+					pos  = pos,
+					kind = item_sprite,
+				}
+
+				ctx.gs.items[pos] = item
 
 				tile.time = 0
 			} else {
@@ -686,6 +743,16 @@ game_draw :: proc() {
 				utils.xform_rotate(rot(tile.rotation)),
 				z_layer = .background,
 				anim_index = tile.anim_index,
+			)
+		}
+
+		for _, &item in ctx.gs.items {
+			draw_sprite(
+				item.pos,
+				item.kind,
+				xform = utils.xform_scale(Vec2{0.357, 0.357}),
+				z_layer = .background,
+				pivot = utils.Pivot.top_left,
 			)
 		}
 
